@@ -108,6 +108,7 @@ def pack_example(input_path, output_path):
             "output_dir": output_path,
             "indent": 2,
             "overwrite": True,
+            "serialize_method": "json",
         },
     )
 
@@ -133,7 +134,7 @@ def multi_example(input_path, output_path):
         "save the results."
     )
     coref_pl = Pipeline()
-    coref_pl.set_reader(DirPackReader())
+    coref_pl.set_reader(DirPackReader(), config={"serialize_method": "json"})
     coref_pl.add(MultiPackBoxer())
     coref_pl.add(PackCopier())
     coref_pl.add(ExampleCoreferencer())
@@ -145,6 +146,7 @@ def multi_example(input_path, output_path):
             "output_dir": output_path,
             "indent": 2,
             "overwrite": True,
+            "serialize_method": "json",
         },
     )
 
@@ -160,6 +162,7 @@ def multi_example(input_path, output_path):
         config={
             "multi_pack_dir": os.path.join(output_path, "multi"),
             "data_pack_dir": os.path.join(output_path, "packs"),
+            "serialize_method": "json",
         },
     )
     reading_pl.add(ExampleCorefCounter())

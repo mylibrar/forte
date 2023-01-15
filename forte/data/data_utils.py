@@ -21,6 +21,7 @@ import tarfile
 import urllib.request
 import zipfile
 import re
+import json, jsonschema
 from typing import List, Optional, overload, Union
 
 from forte.utils.types import PathLike
@@ -29,6 +30,51 @@ from forte.utils.utils_io import maybe_create_dir
 __all__ = [
     "maybe_download",
 ]
+
+
+def is_within_directory(directory: str, target: str):
+    r"""Check whether `directory` is within the `target`.
+
+    Args:
+        directory (str): The directory to be checked.
+        target (str): `target` directory that should contain the `directory`
+
+    Returns:
+        Boolean value indicating whether `directory` is within `target`.
+    """
+    # Check whether `target` is in `directory` by comparing the
+    # prefix.
+    abs_directory = os.path.abspath(directory)
+    abs_target = os.path.abspath(target)
+
+    prefix = os.path.commonprefix([abs_directory, abs_target])
+
+    return prefix == abs_directory
+
+
+def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+    r"""Extract a tarball that disallows path traversal. See
+    https://github.com/advisories/GHSA-gw9q-c7gh-j9vm for details.
+
+    Args:
+        tar (str): The path of the tarball.
+        path (str): The directory to control the extraction process.
+        members: Optional subset of files to extract. If given, it must
+          be a subset of the list returned by `getmembers()`.
+        numeric_owners (bool): If True, the uid and gid numbers from
+          the tarfile are used to set the owner/group for the extracted
+          files. Otherwise, the named values from the tarfile are used.
+
+    Raises: Exception: when path traversal is attempted, i.e., trying
+        to create files outside of the designated directory.
+    """
+    for member in tar.getmembers():
+        # Untar each files individually, reject ones outside of CWD.
+        member_path: str = os.path.join(path, member.name)
+        if not is_within_directory(path, member_path):
+            raise Exception("Attempted Path Traversal in Tar File")
+
+    tar.extractall(path, members, numeric_owner=numeric_owner)
 
 
 # TODO: Remove these once pylint supports function stubs.
@@ -123,7 +169,8 @@ def maybe_download(
                 logging.info("Extract %s", filepath)
                 if tarfile.is_tarfile(filepath):
                     with tarfile.open(filepath, "r") as tfile:
-                        tfile.extractall(path)
+                        safe_extract(tfile, path)
+
                 elif zipfile.is_zipfile(filepath):
                     with zipfile.ZipFile(filepath) as zfile:
                         zfile.extractall(path)
@@ -208,7 +255,7 @@ def _download_from_google_drive(
         params = {"id": file_id, "confirm": token}
         response = sess.get(gurl, params=params, stream=True)
     while response.status_code != 200 and num_retries > 0:
-        response = requests.get(gurl, params=params, stream=True)
+        response = requests.get(gurl, params=params, stream=True, timeout=30)
         num_retries -= 1
     if response.status_code != 200:
         logging.error(
@@ -232,3 +279,24 @@ def _download_from_google_drive(
     logging.info("Successfully downloaded %s", filename)
 
     return filepath
+
+def validate_json_schema(input_filepath: str):
+    """
+    Validates the input json schema using validation meta-schema provided in
+    `validation_filepath.json` according to the specification in
+    `http://json-schema.org`.
+    If the tested json is not valid, a `jsonschema.exceptions.ValidationError`
+    is thrown.
+    Args:
+        input_filepath: Filepath of the json schema to be validated
+    """
+    validation_file_path = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "pack_validation_schema.json")
+    )
+    with open(
+        validation_file_path, "r", encoding="utf-8"
+    ) as validation_json_file:
+        validation_schema = json.loads(validation_json_file.read())
+    with open(input_filepath, "r", encoding="utf-8") as input_json_file:
+        input_schema = json.loads(input_json_file.read())
+    jsonschema.Draft6Validator(validation_schema).validate(input_schema)

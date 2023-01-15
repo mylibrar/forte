@@ -2,6 +2,7 @@
 Unit tests for multi pack related operations.
 """
 import logging
+from typing import Any, Dict
 import unittest
 
 from forte.data.data_pack import DataPack
@@ -38,8 +39,25 @@ class DataPackTest(unittest.TestCase):
         self.data_pack2.set_text("This pack contains some other sample data.")
 
     def test_serialization(self):
-        ser_str: str = self.multi_pack.to_string()
-        print(ser_str)
+        mp: MultiPack = self.multi_pack
+
+        # Serialize and deserialize MultiPack object
+        serialized_mp = mp.to_string(drop_record=True)
+        recovered_mp = MultiPack.from_string(serialized_mp)
+
+        # Serialize and deserialize DataPack objects
+        s_packs = [p.to_string() for p in mp.packs]
+        recovered_packs = [DataPack.from_string(s) for s in s_packs]
+
+        # Add the recovered DataPack objects to MultiPack
+        recovered_mp.relink(recovered_packs)
+
+        # Validate the deserialized MultiPack object
+        for pack_name in mp.pack_names:
+            self.assertEqual(
+                recovered_mp.get_pack(pack_name).pack_id,
+                mp.get_pack(pack_name).pack_id
+            )
 
     def test_add_pack(self):
         data_pack3 = self.multi_pack.add_pack(ref_name="new pack")
@@ -96,9 +114,27 @@ class DataPackTest(unittest.TestCase):
         g: MultiPackGroup
         for g in self.multi_pack.get(MultiPackGroup):
             e: Annotation
-            group_content.append(tuple([e.text for e in g.get_members()]))
+            temp_list = []
+            for e in g.get_members():
+                temp_list.append(e.text)
+            group_content.append(tuple(temp_list))
 
         self.assertListEqual(expected_content, group_content)
+
+        # Get raw groups
+        group_content = []
+        grp: Dict[str, Any]
+        for grp in self.multi_pack.get(MultiPackGroup, get_raw=True):
+            temp_list = []
+            # Note here that grp represents a dictionary and not an object
+            for pack, mem in grp['members']:
+                mem_obj = self.multi_pack.get_subentry(pack, mem)
+                temp_list.append(mem_obj.text)
+
+            group_content.append(tuple(temp_list))
+        self.assertListEqual(expected_content, group_content)
+        
+
 
     def test_multipack_entries(self):
         """

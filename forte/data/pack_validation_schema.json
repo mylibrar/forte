@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pack JSON Schema",
+  "description": "JSON schema of serialized DataPack or MultiPack.",
+  "type": "object",
+  "required": [
+    "_json_class", "_json_state"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_json_class": {
+      "description": "Class name of the pack.",
+      "enum": ["forte.data.data_pack.DataPack", "forte.data.multi_pack.MultiPack"]
+    },
+    "_json_state": {
+      "description": "Content of the pack.",
+      "type": "object",
+      "properties": {
+        "pack_version": {
+          "type": "string"
+        },
+        "_meta": {
+          "type": "object"
+        },
+        "_data_store": {
+          "type": "object"
+        },
+        "text_payloads": {
+          "type": "array"
+        },
+        "audio_payloads": {
+          "type": "array"
+        },
+        "image_payloads": {
+          "type": "array"
+        },
+        "_creation_records": {
+          "type": "object"
+        },
+        "_field_records": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "if": {
+    "properties": { "_json_class": { "const": "forte.data.data_pack.DataPack" } }
+  },
+  "then": {
+    "properties": {
+      "_json_state": {
+        "description": "Content of the pack.",
+        "type": "object"
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "type": "string"
+    } 
+  }
+}

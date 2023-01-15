@@ -31,8 +31,10 @@ from typing import (
     Union,
     Dict,
     Iterator,
+    cast,
     overload,
     List,
+    Any,
 )
 import math
 import numpy as np
@@ -51,6 +53,7 @@ __all__ = [
     "FNdArray",
     "MultiEntry",
     "Grid",
+    "ENTRY_TYPE_DATA_STRUCTURES",
 ]
 
 default_entry_fields = [
@@ -103,7 +106,7 @@ class Entry(Generic[ContainerType]):
     """
     # This dict is used only at the time of creation of an entry. Many entries
     # like Annotation require some attributes like begin and end to be set at
-    # the time of creation. This dictionry is used to set all dataclass
+    # the time of creation. This dictionary is used to set all dataclass
     # attributes of an entry whose datastore entry needs to be created irrespective
     # of whether a getter and setter property for its attributes is made or not.
     # The key of this dictionary is the name of the entry being created and the
@@ -295,43 +298,34 @@ class FList(Generic[ParentEntryType], MutableSequence):
     def __init__(
         self,
         parent_entry: ParentEntryType,
-        data: Optional[List[int]] = None,
+        data: Optional[List[Union[int, Tuple[int, int]]]] = None,
     ):
         super().__init__()
         self.__parent_entry = parent_entry
-        self.__data: List[int] = [] if data is None else data
+        self.__data: List[Union[int, Tuple[int, int]]] = (
+            [] if data is None else data
+        )
 
     def __eq__(self, other):
         return self.__data == other._FList__data
-
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        # Parent entry cannot be serialized, should be set by the parent with
-        #  _set_parent.
-        state.pop("_FList__parent_entry")
-
-        state["data"] = state.pop("_FList__data")
-
-        # We make a copy of the whole state but there are items cannot be
-        # serialized.
-        for f in unserializable_fields:
-            if f in state:
-                state.pop(f)
-        return state
-
-    def __setstate__(self, state):
-        state["_FList__data"] = state.pop("data")
-        self.__dict__.update(state)
 
     def _set_parent(self, parent_entry: ParentEntryType):
         self.__parent_entry = parent_entry
 
     def insert(self, index: int, entry: EntryType):
-        self.__data.insert(index, entry.tid)
+        # If the pack id of the entry is not equal to the pack id
+        # of the parent, it indicates that the entries being stored
+        # are MultiPack entries. Thus, we store the entries as a tuple
+        # of the entry's pack id and the entry's tid in contrast to
+        # regular entries which are just stored by their tid
+        if entry.pack.pack_id != self.__parent_entry.pack.pack_id:
+            self.__data.insert(index, (entry.pack.pack_id, entry.tid))
+        else:
+            self.__data.insert(index, entry.tid)
 
     @overload
     @abstractmethod
-    def __getitem__(self, i: int) -> EntryType:
+    def __getitem__(self, i: int) -> Entry[Any]:
         ...
 
     @overload
@@ -343,22 +337,66 @@ class FList(Generic[ParentEntryType], MutableSequence):
         self, index: Union[int, slice]
     ) -> Union[EntryType, MutableSequence]:
         if isinstance(index, slice):
-            return [
-                self.__parent_entry.pack.get_entry(tid)
-                for tid in self.__data[index]
-            ]
+            if all(isinstance(val, int) for val in self.__data):
+                # If entry data is stored just be an integer, it indicates
+                # that this is a Single Pack entry (stored just by its tid)
+                return [
+                    self.__parent_entry.pack.get_entry(tid)
+                    for tid in self.__data[index]
+                ]
+            else:
+                # else, it indicates that this is a Multi Pack
+                # entry (stored as a tuple)
+                return [
+                    self.__parent_entry.pack.get_subentry(*attr)
+                    for attr in self.__data[index]
+                ]
         else:
-            return self.__parent_entry.pack.get_entry(self.__data[index])
+            if all(isinstance(val, int) for val in self.__data):
+                # If entry data is stored just be an integer, it indicates
+                # that this is a Single Pack entry (stored just by its tid)
+                return self.__parent_entry.pack.get_entry(self.__data[index])
+            else:
+                # else, it indicates that this is a Multi Pack
+                # entry (stored as a tuple)
+                return self.__parent_entry.pack.get_subentry(
+                    *self.__data[index]
+                )
 
     def __setitem__(
         self,
         index: Union[int, slice],
         value: Union[EntryType, Iterable[EntryType]],
     ) -> None:
+
         if isinstance(index, int):
-            self.__data[index] = value.tid  # type: ignore
+            value = cast(EntryType, value)
+            if value.pack.pack_id != self.__parent_entry.pack.pack_id:
+                # If the pack id of the entry is not equal to the pack id
+                # of the parent, it indicates that the entries being stored
+                # are MultiPack entries.
+                self.__data[index] = (value.pack.pack_id, value.tid)
+            else:
+                # If the pack id of the entry is equal to the pack id
+                # of the parent, it indicates that the entries being stored
+                # are Single Pack entries.
+                self.__data[index] = value.tid
         else:
-            self.__data[index] = [v.tid for v in value]  # type: ignore
+            value = cast(Iterable[EntryType], value)
+            if all(
+                val.pack.pack_id != self.__parent_entry.pack.pack_id
+                for val in value
+            ):
+                # If the pack id of the entry is not equal to the pack id
+                # of the parent for all entries in the FList data,
+                # it indicates that the entries being stored
+                # are MultiPack entries.
+                self.__data[index] = [(v.pack.pack_id, v.tid) for v in value]
+            else:
+                # If the pack id of the entry is equal to the pack id
+                # of the parent for any FList data item, it indicates that
+                # the entries being stored are Single Pack entries.
+                self.__data[index] = [v.tid for v in value]
 
     def __delitem__(self, index: Union[int, slice]) -> None:
         del self.__data[index]
@@ -393,25 +431,6 @@ class FDict(Generic[KeyType, ValueType], MutableMapping):
 
     def __eq__(self, other):
         return self.__data == other._FDict__data
-
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        # The __parent_entry need to be assigned via its parent entry,
-        # so a serialized dict may not have the following key ready sometimes.
-        state.pop("_FDict__parent_entry")
-
-        state["data"] = state.pop("_FDict__data")
-
-        # We make a copy of the whole state but there are items cannot be
-        # serialized.
-        for f in unserializable_fields:
-            if f in state:
-                state.pop(f)
-        return state
-
-    def __setstate__(self, state):
-        state["_FDict__data"] = state.pop("data")
-        self.__dict__.update(state)
 
     def __setitem__(self, k: KeyType, v: ValueType) -> None:
         try:
@@ -449,27 +468,25 @@ class FNdArray:
         self, dtype: Optional[str] = None, shape: Optional[List[int]] = None
     ):
         super().__init__()
-        self._dtype: Optional[np.dtype] = (
-            np.dtype(dtype) if dtype is not None else dtype
-        )
-        self._shape: Optional[tuple] = (
-            tuple(shape) if shape is not None else shape
-        )
-        self._data: Optional[np.ndarray] = None
-        if dtype and shape:
-            self._data = np.ndarray(shape, dtype=dtype)
+        self.__data_ref: List = [dtype, shape, None]
 
     @property
     def dtype(self):
-        return self._dtype
+        dtype = self.__data_ref[0]
+        return np.dtype(dtype) if dtype is not None else dtype
 
     @property
     def shape(self):
-        return self._shape
+        shape = self.__data_ref[1]
+        return tuple(shape) if shape is not None else shape
 
     @property
     def data(self):
-        return self._data
+        if self.__data_ref[2] is None:
+            if self.dtype and self.shape:
+                return np.ndarray(self.shape, dtype=self.dtype)
+            return None
+        return np.array(self.__data_ref[2], dtype=self.dtype)
 
     @data.setter
     def data(self, array: Union[np.ndarray, List]):
@@ -482,7 +499,7 @@ class FNdArray:
                 raise AttributeError(
                     f"Expecting shape {self.shape}, but got {array.shape}."
                 )
-            self._data = array
+            array_np = array
 
         elif isinstance(array, list):
             array_np = np.array(array, dtype=self.dtype)
@@ -490,16 +507,28 @@ class FNdArray:
                 raise AttributeError(
                     f"Expecting shape {self.shape}, but got {array_np.shape}."
                 )
-            self._data = array_np
 
         else:
             raise ValueError(
                 f"Can only accept numpy array or python list, but got {type(array)}"
             )
 
+        self.__data_ref[2] = array_np.tolist()
+
         # Stored dtype and shape should match to the provided array's.
-        self._dtype = self._data.dtype
-        self._shape = self._data.shape
+        self.__data_ref[0] = array_np.dtype.str
+        self.__data_ref[1] = list(array_np.shape)
+
+    def set_data_ref(self, data_ref: List):
+        """
+        Set the internal storage to reference of a list.
+        This is only for internal usage.
+
+        Args:
+            data_ref: A reference to a list storing `[dtype, shape, data]`
+                info from `DataStore`.
+        """
+        self.__data_ref = data_ref
 
 
 class BaseLink(Entry, ABC):
@@ -750,6 +779,7 @@ class Grid:
             w_idx: the zero-based width(column) index of the grid cell in the
                 grid, the unit is one grid cell.
 
+
         Raises:
             ValueError: ``h_idx`` is out of the range specified by ``height``.
             ValueError: ``w_idx`` is out of the range specified by ``width``.
@@ -809,6 +839,7 @@ class Grid:
         The computation of the center position of the grid cell is
         dividing the grid cell height range (unit: pixel) and
         width range (unit: pixel) by 2 (round down)
+
         Suppose an edge case that a grid cell has a height range
         (unit: pixel) of (0, 3)
         and a width range (unit: pixel) of (0, 3) the grid cell center

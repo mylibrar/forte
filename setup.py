@@ -12,7 +12,7 @@ if sys.version_info < (3, 6):
 VERSION_VAR = "VERSION"
 version = {}
 with open(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "forte/version.py")
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "forte/version.py")
 ) as fp:
     exec(fp.read(), version)
 if VERSION_VAR not in version or not version[VERSION_VAR]:
@@ -26,7 +26,7 @@ setuptools.setup(
     version=version[VERSION_VAR],
     url="https://github.com/asyml/forte",
     description="Forte is extensible framework for building composable and "
-    "modularized NLP workflows.",
+                "modularized NLP workflows.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="Apache License Version 2.0",
@@ -49,18 +49,18 @@ setuptools.setup(
         'typing>=3.7.4;python_version<"3.5"',
         "typing-inspect>=0.6.0",
         'dataclasses~=0.7;python_version<"3.7"',
-        'importlib-resources>=5.1.4;python_version<"3.7"',
+        'importlib-resources>=5.1.4;python_version<"3.9"',
         "asyml-utilities",
     ],
     extras_require={
         "data_aug": [
-            "transformers>=4.15.0",
+            "transformers>=4.15.0, <=4.22.2",
             "nltk",
             "texar-pytorch>=0.1.4",
             "requests",
         ],
         "ir": ["texar-pytorch>=0.1.4", "tensorflow>=1.15.0"],
-        "remote": ["fastapi>=0.65.2, <=0.75.2", "uvicorn>=0.14.0", "requests"],
+        "remote": ["fastapi>=0.65.2, <=0.75.2", "pydantic<=1.9.2", "uvicorn>=0.14.0", "requests"],
         "audio_ext": ["soundfile>=0.10.3"],
         "stave": ["stave>=0.0.1.dev12"],
         "models": [
@@ -70,20 +70,29 @@ setuptools.setup(
             "texar-pytorch>=0.1.4",
             "tensorflow>=1.15.0",
             "pyannote.audio",
-            "pytorch-transformers",
+            "pytorch-transformers==1.2.0",
+            "transformers>=4.15.0, <=4.22.2",
+            'typing-extensions==4.4.0;python_version>="3.7"',
         ],
         "test": [
             "ddt",
             "testfixtures",
             "testbook",
             "termcolor",
-            "transformers>=4.15.0",
             "nltk",
+            "transformers>=4.15.0, <=4.22.2",
         ],
         "wikipedia": ["rdflib==4.2.2"],
         # transformers 4.10.0 will break the translation model we used here
         "nlp": ["texar-pytorch>=0.1.4"],
         "extractor": ["texar-pytorch>=0.1.4"],
+        "payload": [
+            "soundfile>=0.10.3",
+            "Pillow",
+            "requests",
+            "urlpath>=1.2.0"
+        ],
+        "ocr_tutorial": ["Pillow", "requests", "pytesseract"]
     },
     entry_points={
         "console_scripts": [
